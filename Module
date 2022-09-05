@@ -1,0 +1,184 @@
+local getInfo = require(game.ReplicatedStorage.Modules.GetInfo)
+local eq = require(game.ReplicatedStorage.Modules.Data.Equations)
+
+local defaultMods = {
+	PunchMods = {},
+	BlockMods = {},
+	AbilityMods = {},
+	DefenseMods = {},
+}
+
+local mods = {
+	Example = defaultMods
+}
+
+local function getOrder(x,y)
+	return x >= y and x or y, y <= x and y or x
+end
+
+local typeTree = {
+	["Percentage"] = function(amount, org, randomize: number)
+		if randomize then
+			return org + org * (math.random(getOrder(org, randomize)) * .01)
+		else
+			return org + org * (amount * .01)
+		end
+	end,
+	["Addition"] = function(amount, org, randomize: number)
+		if randomize then
+			return org + math.random(getOrder(org, randomize))
+		else
+			return org + amount
+		end
+	end,
+	["Multiplication"] = function(amount, org, randomize)
+		if randomize then
+			return org * math.random(getOrder(org, randomize))
+		else
+			return org * amount
+		end
+	end,
+	["Division"] = function(amount, org, randomize)
+		if randomize then
+			return org / math.random(getOrder(org, randomize))
+		else
+			return org / amount
+		end
+	end,
+}
+
+local handler = {}
+
+function handler.ApplyAll(name: string, mType: string, dmg: number, extraInfo)
+	print(dmg, "before")
+	local retrievedMods = mods[name]
+	if not retrievedMods then 
+		return dmg 
+	end
+	
+	local mod = retrievedMods[mType]
+	
+	for i,v in pairs(mod) do
+		if extraInfo then
+			local target = extraInfo.Target.Name
+			if v.Whitelist and #v.Whitelist > 0 then
+				if not table.find(v.Whitelist, target) then
+					continue
+				end
+			elseif v.Blacklist and #v.Blacklist > 0 then
+				if table.find(v.Blacklist, target) then
+					continue
+				end
+			end
+		end
+		if v.Callback and v.Amount == nil then
+			local result = v.Callback(dmg, extraInfo)
+			if type(result) == "number" then
+				dmg = result
+			end
+		elseif v.Callback then
+			dmg = typeTree[i:split("_")[1]](v.Amount, dmg, v.Randomize)
+			local result = v.Callback(dmg, extraInfo)
+			if type(result) == "number" then
+				dmg = result
+			end
+		end
+	end
+	print(dmg, "after")
+	return math.round(dmg)
+end
+
+function handler.ApplyHighest(char: Model, all: boolean) -- Will apply the highest added value from every value object. (if add is true, it will apply every highest value for each different type)
+	
+end
+
+function handler.ApplyLowest(char: Model, all: boolean)
+	
+end
+
+function handler.Apply(name: string,  mType: string, dmg: number, extraInfo)
+	
+end
+
+function handler.CreateModifier(mType: string, vType: string, name: string, amount: number, lifetime: number, randomize: number, whitelist, blacklist, callback)
+	-- Creates new table for the player if there isnt any
+	if not mods[name] then
+		mods[name] = defaultMods
+	end
+	
+	----------------------
+	-- Verify arguments
+	----------------------
+	
+	if type(mType) ~= "string" then
+		error("Invalid value for Modifer Type, expected string, got "..type(mType)..".")
+	elseif not mods[name][mType] then
+		error("Invalid Modifier Type, "..mType.." does not exist.")
+	end
+	if type(vType) ~= "string" then
+		error("Invalid value for Modifier Value Type, expected string, got "..type(vType)..".")
+	elseif not typeTree[vType] then
+		error("Invalid Modifier Value Type, "..vType.." does not exist.")
+	end
+	if type(name) ~= "string" then
+		error("Invalid name value, expected string, got "..type(name))
+	end
+	if type(amount) ~= "number" and not callback then
+		error("Invalid amount value, expected number, got "..type(amount))
+	end
+	if lifetime and type(lifetime) ~= "number" then
+		error("Invalid lifetime value, expected number, got "..type(lifetime))
+	end
+	if randomize and type(randomize) ~= "number" then
+		error("Invalid randomize value, expected number, got "..type(randomize))
+	end
+	if whitelist and blacklist and #whitelist > 0 and #blacklist > 0 then
+		error("You cannot have a blacklist and a whitelist at the same time")
+	end
+	if blacklist and type(blacklist) ~= "table" then
+		error("Invalid blacklist value, expected table, got "..type(blacklist))
+	elseif whitelist and type(whitelist) ~= "table" then
+		error("Invalid whitelist value, expected table, got "..type(whitelist))
+	end
+	if callback and type(callback) ~= "function" then
+		error("Invalid callback value, expected function, got "..type(callback))
+	end
+	-----------------------
+	-- Creating modifier
+	-----------------------
+	
+	-- Creates the table for the new modifier
+	local newMod = {
+		Amount = amount,
+		Randomize = randomize,
+		Whitelist = whitelist,
+		Blacklist = blacklist,
+		Callback = callback,
+	}
+	
+	-- Adds to the specified modifier type
+	local values = eq.ElementAmount(mods[name][mType], vType)
+	mods[name][mType][vType.."_"..values] = newMod
+	
+	if lifetime then
+		task.delay(lifetime, function()
+			mods[name][mType][vType.."_"..values] = nil
+		end)
+	end
+	
+	-- Returns the created modifier's index (use only as a reference as it is not editable)
+	return vType.."_"..values
+end
+
+function handler.DeleteModifier(name, mType, index)
+	local pmods = mods[name]
+	if not pmods then 
+		return
+	end
+	local v = pmods[mType]
+	if v[index] then
+		mods[name][mType][index] = nil
+	end
+end
+
+return handler
